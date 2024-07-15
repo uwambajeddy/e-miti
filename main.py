@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from __future__ import annotations
 import urwid
 import typing
@@ -5,6 +7,7 @@ from auth import register_user, authenticate_user
 from inventory import get_inventory, add_item, update_item, delete_item
 
 choices = ["Register", "Login", "Exit"]
+
 
 palette = [
     ("reversed", "standout", ""),
@@ -36,20 +39,37 @@ def register_form() -> urwid.Widget:
     body = [urwid.Text("Register"), urwid.Divider()]
     username_edit = urwid.Edit("Username: ")
     password_edit = urwid.Edit("Password: ", mask="*")
-    role_edit = urwid.Edit("Role (Admin/Pharmacist/Inventory Manager): ")
+
+    role_group = []
+    roles = ["Admin", "Pharmacist", "Inventory Manager", "Hospital"]
+    role_options = [urwid.RadioButton(role_group, role) for role in roles]
+    
     register_button = urwid.Button("Register")
-    urwid.connect_signal(register_button, "click", register_action, (username_edit, password_edit, role_edit))
-    body.extend([username_edit, password_edit, role_edit, urwid.AttrMap(register_button, None, focus_map="reversed")])
+    urwid.connect_signal(register_button, "click", register_action, (username_edit, password_edit, role_group))
+
+    body.extend([
+        username_edit,
+        password_edit,
+        urwid.Text("Role:"),
+        *role_options,
+        urwid.AttrMap(register_button, None, focus_map="reversed"),
+    ])
+    # role_edit = urwid.Edit("Role (Admin/Pharmacist/Inventory Manager): ")
+    # register_button = urwid.Button("Register")
+    # urwid.connect_signal(register_button, "click", register_action, (username_edit, password_edit, role_edit))
+    # body.extend([username_edit, password_edit, role_edit, urwid.AttrMap(register_button, None, focus_map="reversed")])
     return urwid.ListBox(urwid.SimpleFocusListWalker(body))
 
-def register_action(button: urwid.Button, edits: typing.Tuple[urwid.Edit, urwid.Edit, urwid.Edit]) -> None:
+def register_action(button: urwid.Button, edits: typing.Tuple[urwid.Edit, urwid.Edit, list]) -> None:
     username = edits[0].edit_text
     password = edits[1].edit_text
-    role = edits[2].edit_text.lower().strip()
+    role_group = edits[2]
+
+    selected_role = next((rb.label for rb in role_group if rb.state), None)
     
-    if role not in ['admin', 'pharmacist', 'inventory manager']:
-        response = urwid.Text(("error", "Invalid role. Must be one of: Admin, Pharmacist, Inventory Manager\n"))
-    elif register_user(username, password, role):
+    if not selected_role:
+        response = urwid.Text(("error", "Please select a role\n"))
+    elif register_user(username, password, selected_role.lower()):
         response = urwid.Text(("success", "Registration successful\n"))
     else:
         response = urwid.Text(("error", "Username already taken\n"))
@@ -102,8 +122,8 @@ def inventory_menu(username: str) -> None:
 def add_item_form(username: str) -> urwid.Widget:
     body = [urwid.Text("Add Item"), urwid.Divider()]
     name_edit = urwid.Edit("Item Name: ")
-    quantity_edit = urwid.Edit("Quantity: ")
-    price_edit = urwid.Edit("Price: ")
+    quantity_edit = urwid.Edit("Quantity/Pack: ")
+    price_edit = urwid.Edit("Price/Unit: ")
     description_edit = urwid.Edit("Description: ")
     expiry_date_edit = urwid.Edit("Expiry Date (YYYY-MM-DD): ")
     add_button = urwid.Button("Add")
