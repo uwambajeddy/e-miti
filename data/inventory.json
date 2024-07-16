@@ -46,5 +46,42 @@
                 "created_at": "2024-07-16 16:26:37"
             }
         ]
+    },
+    "eddy": {
+        "doxycline": [
+            {
+                "id": 2,
+                "name": "doxycline",
+                "quantity": 12,
+                "price": 5000.0,
+                "Code": "20",
+                "expiry_date": "2021-01-09",
+                "created_at": "2024-07-16 18:21:33"
+            }
+        ],
+        "wefe": [
+            {
+                "id": 3,
+                "name": "wefe",
+                "quantity": 100,
+                "price": 10000.0,
+                "Code": "jeuirhfiuer",
+                "expiry_date": "2025-01-01",
+                "created_at": "2024-07-16 18:37:48"
+            }
+        ]
+    },
+    "": {
+        "ccerw": [
+            {
+                "id": 1,
+                "name": "ccerw",
+                "quantity": 12,
+                "price": 876543.0,
+                "Code": "dcd",
+                "expiry_date": "2025-01-01",
+                "created_at": "2024-07-16 21:12:32"
+            }
+        ]
     }
 }

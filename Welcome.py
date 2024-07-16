@@ -12,7 +12,7 @@ palette = [
 ]
 
 def start_main():
-    subprocess.run(["python3", "main.py"])
+    subprocess.run(["py", "main.py"])
 
 def on_enter(button):
     # Start main.py in a new thread
