@@ -1,6 +1,6 @@
 import json
 import hashlib
-import typing  # Add this line to import typing module
+import typing
 
 USERS_DB = "data/users.json"
 

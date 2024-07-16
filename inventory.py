@@ -19,7 +19,7 @@ def get_inventory(username: str) -> dict:
     inventory = load_inventory()
     return inventory.get(username, {})
 
-def add_item(username: str, name: str, quantity: int, price: float, description: str, expiry_date: str) -> bool:
+def add_item(username: str, name: str, quantity: int, price: float, Code: str, expiry_date: str) -> bool:
     inventory = load_inventory()
     user_inventory = inventory.get(username, {})
     if name in user_inventory:
@@ -30,7 +30,7 @@ def add_item(username: str, name: str, quantity: int, price: float, description:
         "name": name,
         "quantity": quantity,
         "price": price,
-        "description": description,
+        "Code": Code,
         "expiry_date": expiry_date,
         "created_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }]
@@ -38,7 +38,7 @@ def add_item(username: str, name: str, quantity: int, price: float, description:
     save_inventory(inventory)
     return True
 
-def update_item(username: str, name: str, quantity: int, price: float, description: str, expiry_date: str) -> bool:
+def update_item(username: str, name: str, quantity: int, price: float, Code: str, expiry_date: str) -> bool:
     inventory = load_inventory()
     user_inventory = inventory.get(username, {})
     if name not in user_inventory:
@@ -48,7 +48,7 @@ def update_item(username: str, name: str, quantity: int, price: float, descripti
         "name": name,
         "quantity": quantity,
         "price": price,
-        "description": description,
+        "Code": Code,
         "expiry_date": expiry_date,
         "created_at": user_inventory[name][0]['created_at'],
         "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
