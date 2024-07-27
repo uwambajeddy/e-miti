@@ -1,11 +1,15 @@
 #!/usr/bin/python3
+import warnings
 import urwid
-import typing
-from auth import register_user, authenticate_user
-from inventory import get_inventory, add_item, update_item, delete_item
+from user_management import UserManagement
+from user_database import UserDatabase
+from inventory_management import InventoryManagement
+from inventory_database import InventoryDatabase
 from datetime import datetime
+import typing
 
-# Define the palette for the UI colors
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 palette = [
     ('banner', 'light cyan', 'black'),
     ('streak', 'yellow', 'black'),
@@ -24,10 +28,12 @@ palette = [
 ]
 
 choices = ["Register", "Login", "Exit"]
-inventory_choices = ["Add Item", "Update Item", "Delete Item", "Logout"]
+inventory_choices = ["Add Item", "Update Item", "Delete Item", "Search Item", "Flag Item", "Logout"]
 
-class InventorySystem:
-    def __init__(self):
+class InventorySystemUI:
+    def __init__(self, user_mgmt: UserManagement, inventory_mgmt: InventoryManagement):
+        self.user_mgmt = user_mgmt
+        self.inventory_mgmt = inventory_mgmt
         self.main = urwid.Padding(urwid.SolidFill(), left=2, right=2)
         self.top = urwid.Overlay(
             self.main, urwid.SolidFill("\N{MEDIUM SHADE}"),
@@ -35,8 +41,10 @@ class InventorySystem:
             valign="middle", height=("relative", 80),
             min_width=20, min_height=9
         )
+        self.username = None
+        self.action_view = None
 
-    def main_menu(self):
+    def main_menu(self, button=None):
         title = urwid.BigText("E-miti Inventory System", urwid.font.HalfBlock7x7Font())
         title = urwid.Padding(title, 'center', width='clip')
         
@@ -45,7 +53,7 @@ class InventorySystem:
         buttons = []
         for choice in choices:
             button = urwid.Button(choice)
-            urwid.connect_signal(button, 'click', self.item_chosen, choice)
+            urwid.connect_signal(button, 'click', self.item_chosen, user_arg=choice)
             button = urwid.AttrMap(button, 'button', focus_map='button_focus')
             buttons.append(urwid.Padding(button, align='center', width=20))
 
@@ -95,20 +103,17 @@ class InventorySystem:
         username = edits[0].edit_text
         password = edits[1].edit_text
         role_group = edits[2]
-
         selected_role = next((rb.label for rb in role_group if rb.state), None)
-        
         if not selected_role:
             response = urwid.Text(("error", "Please select a role\n"))
-        elif register_user(username, password, selected_role.lower()):
+        elif self.user_mgmt.register_user(username, password, selected_role.lower()):
             response = urwid.Text(("success", "Registration successful\n"))
         else:
             response = urwid.Text(("error", "Username already taken\n"))
-        
         done = urwid.Button("Ok")
         urwid.connect_signal(done, "click", lambda button: self.main_menu())
         self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
-
+    
     def login_form(self):
         body = [urwid.Text("Login"), urwid.Divider()]
         username_edit = urwid.Edit("Username: ")
@@ -121,178 +126,222 @@ class InventorySystem:
     def login_action(self, button, edits):
         username = edits[0].edit_text
         password = edits[1].edit_text
-        if authenticate_user(username, password):
-            self.inventory_menu(username)
+        authenticated, role = self.user_mgmt.authenticate_user(username, password)
+        if authenticated:
+            self.username = username
+            self.inventory_menu()
         else:
             response = urwid.Text(("error", "Login failed\n"))
             done = urwid.Button("Ok")
             urwid.connect_signal(done, "click", self.main_menu)
             self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
-        
-    def inventory_menu(self, username):
-        tasks_content = [
-            ("header", " ID   NAME           EXPIRY_DATE   PRICE     QUANTITY           CODE      "),
-        ]
-        inventory = get_inventory(username)
 
-        # Find the maximum width for each column
-        max_widths = [len(col) for col in tasks_content[0][1].split()]
-
+    def inventory_menu(self):
+        inventory = self.inventory_mgmt.get_inventory(self.username)
+    
+        header = urwid.Columns([
+            urwid.Text("ID"),
+            urwid.Text("Name"),
+            urwid.Text("Expiry Date"),
+            urwid.Text("Price"),
+            urwid.Text("Quantity"),
+            urwid.Text("Code")
+        ])
+    
+        items = []
         for item_list in inventory.values():
             for item in item_list:
-                # Update max widths based on current item
-                max_widths[0] = max(max_widths[0], len(str(item['id'])) + len("ID"))
-                max_widths[1] = max(max_widths[1], len(item['name']) + len("NAME"))
-                max_widths[2] = max(max_widths[2], len(item['expiry_date']) + len("EXPIRY_DATE"))
-                max_widths[3] = max(max_widths[3], len(str(item['price'])) + len("PRICE"))
-                max_widths[4] = max(max_widths[4], len(str(item['quantity'])) + len("QUANTITY"))
-                max_widths[5] = max(max_widths[5], len(str(item['Code'])) + len("CODE"))
-
-        # Adjust tasks_content with dynamically calculated column widths
-        tasks_content[0] = ("header", f" ID{' '*(max_widths[0]-2)} NAME{' '*(max_widths[1]-4)} EXPIRY_DATE{' '*(max_widths[2]-11)} PRICE{' '*(max_widths[3]-6)} QUANTITY{' '*(max_widths[4]-8)} CODE{' '*(max_widths[5]-4)}")
-
-        for item_list in inventory.values():
-            for item in item_list:
+                item_widget = urwid.Columns([
+                    urwid.Text(str(item['id'])),
+                    urwid.Text(item['name']),
+                    urwid.Text(item['expiry_date']),
+                    urwid.Text(str(item['price'])),
+                    urwid.Text(str(item['quantity'])),
+                    urwid.Text(str(item['code']))
+                ])
                 if item['expiry_date'] < datetime.now().strftime('%Y-%m-%d %H:%M:%S'):
-                    tasks_content.append(("expired", f" {item['id']}{' '*(max_widths[0]-len(str(item['id'])))} {item['name']}{' '*(max_widths[1]-len(item['name']))} {item['expiry_date']}{' '*(max_widths[2]-len(item['expiry_date']))} {item['price']}{' '*(max_widths[3]-len(str(item['price'])))} {item['quantity']}{' '*(max_widths[4]-len(str(item['quantity'])))} {item['Code']}{' '*(max_widths[5]-len(str(item['Code'])))}"))
+                    items.append(urwid.AttrMap(item_widget, 'expired'))
+                elif item.get('flag', False):
+                    items.append(urwid.AttrMap(item_widget, 'flagged'))
                 else:
-                    tasks_content.append(("body", f" {item['id']}{' '*(max_widths[0]-len(str(item['id'])))} {item['name']}{' '*(max_widths[1]-len(item['name']))} {item['expiry_date']}{' '*(max_widths[2]-len(item['expiry_date']))} {item['price']}{' '*(max_widths[3]-len(str(item['price'])))} {item['quantity']}{' '*(max_widths[4]-len(str(item['quantity'])))} {item['Code']}{' '*(max_widths[5]-len(str(item['Code'])))}"))
+                    items.append(item_widget)
 
-        # Create widgets with adjusted content
-        tasks_list = urwid.SimpleListWalker([urwid.AttrMap(urwid.Text(item[1]), item[0]) for item in tasks_content])
+        inventory_list = urwid.ListBox(urwid.SimpleFocusListWalker([header] + items))
+        inventory_box = urwid.LineBox(inventory_list, title="Inventory")
 
-        # Create buttons for the menu options on the right side
-        menu_items = [
-            urwid.Text(f"=========== Welcome back, {username} ==========="),
-            urwid.Text(""),
-            urwid.Button("Add Item", on_press=lambda button: self.handle_menu_action(username, "add")),
-            urwid.Button("Update Item", on_press=lambda button: self.handle_menu_action(username, "update")),
-            urwid.Button("Delete Item", on_press=lambda button: self.handle_menu_action(username, "delete")),
-            urwid.Button("Logout", on_press=lambda button: self.main_menu())
-        ]
+        menu_items = [urwid.Button(choice, on_press=self.menu_choice) for choice in inventory_choices]
+        menu_list = urwid.ListBox(urwid.SimpleFocusListWalker(menu_items))
+        menu_box = urwid.LineBox(menu_list, title="Menu")
 
-        # Style the buttons
-        menu_items = [urwid.AttrMap(item, "button", focus_map="button_focus") for item in menu_items]
+        self.action_view = urwid.Text("")
+        action_box = urwid.LineBox(self.action_view, title="Action")
 
-        # Wrap the menu items in a ListBox
-        menu_items_listbox = urwid.ListBox(urwid.SimpleFocusListWalker(menu_items))
-
-        # Add padding around the menu items
-        menu_items_with_padding = urwid.Padding(menu_items_listbox, left=2, right=2)
-
-        # Create the columns
-        columns = urwid.Columns([
-            urwid.LineBox(urwid.ListBox(tasks_list), title="Inventory List"),
-            urwid.LineBox(menu_items_with_padding, title="Menu"),
+        right_column = urwid.Pile([
+            ('weight', 1, menu_box),
+            ('weight', 2, action_box)
         ])
 
-        # Update the main widget with the columns
-        self.main.original_widget = columns
+        columns = urwid.Columns([
+            ('weight', 2, inventory_box),
+            ('weight', 1, right_column),
+        ])
 
-    def handle_menu_action(self, username, action):
-        if action == "add":
-            self.add_item_form(username)
-        elif action == "update":
-            self.update_item_form(username)
-        elif action == "delete":
-            self.delete_item_form(username)
+        self.main.original_widget = columns 
 
-    def add_item_form(self, username):
-        body = [urwid.Text("Add Item"), urwid.Divider()]
-        name_edit = urwid.Edit("Item Name: ")
-        quantity_edit = urwid.Edit("Quantity: ")
-        price_edit = urwid.Edit("Price: ")
-        Code_edit = urwid.Edit("Code: ")
-        expiry_date_edit = urwid.Edit("Expiry Date: ")
-        add_button = urwid.Button("Add")
-        urwid.connect_signal(add_button, "click", self.add_item_action, (username, name_edit, quantity_edit, price_edit, Code_edit, expiry_date_edit))
+    def menu_choice(self, button):
+        choice = button.label
+        if choice == "Add Item":
+            self.show_add_item()
+        elif choice == "Update Item":
+            self.show_update_item()
+        elif choice == "Delete Item":
+            self.show_delete_item()
+        elif choice == "Search Item":
+            self.show_search_item()
+        elif choice == "Flag Item":
+            self.show_flag_item()
+        elif choice == "Logout":
+            self.main_menu()
 
-        body.extend([name_edit, quantity_edit, price_edit, Code_edit, expiry_date_edit, urwid.AttrMap(add_button, None, focus_map="reversed")])
-        self.main.original_widget = urwid.ListBox(urwid.SimpleFocusListWalker(body))
+    def show_add_item(self):
+        content = [
+            urwid.Edit("Name: "),
+            urwid.Edit("Quantity: "),
+            urwid.Edit("Price: "),
+            urwid.Edit("Code: "),
+            urwid.Edit("Expiry Date: "),
+            urwid.CheckBox("Flag"),
+            urwid.Button("Add", on_press=self.add_item)
+        ]
+        self.action_view.set_text("")
+        self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
+        self.update_action_box()
 
-    def add_item_action(self, button: urwid.Button, edits: typing.Tuple[str, urwid.Edit, urwid.Edit, urwid.Edit, urwid.Edit, urwid.Edit]) -> None:
-        username = edits[0]
-        name = edits[1].edit_text
-        quantity = edits[2].edit_text
-        price = edits[3].edit_text
-        Code = edits[4].edit_text
-        expiry_date = edits[5].edit_text
+    def add_item(self, button):
+        form = self.action_view
+        name = form.body[0].edit_text
+        quantity = form.body[1].edit_text
+        price = form.body[2].edit_text
+        code = form.body[3].edit_text
+        expiry_date = form.body[4].edit_text
+        flag = form.body[5].state
 
         try:
             quantity = int(quantity)
             price = float(price)
-            if add_item(username, name, quantity, price, Code, expiry_date):
-                response = urwid.Text(("success", "Item added successfully\n"))
+            if self.inventory_mgmt.add_item(self.username, name, quantity, price, code, expiry_date, flag):
+                self.show_message("Item added successfully")
             else:
-                response = urwid.Text(("error", "Failed to add item\n"))
+                self.show_message("Failed to add item")
         except ValueError:
-            response = urwid.Text(("error", "Invalid input. Quantity must be an integer and price must be a float\n"))
+            self.show_message("Invalid input. Quantity must be an integer and price must be a float")
 
-        done = urwid.Button("Ok")
-        urwid.connect_signal(done, "click", lambda button: self.inventory_menu(username))
-        self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
+    def show_update_item(self):
+        content = [
+            urwid.Edit("Name: "),
+            urwid.Edit("New Quantity: "),
+            urwid.Edit("New Price: "),
+            urwid.Edit("New Code: "),
+            urwid.Edit("New Expiry Date: "),
+            urwid.Button("Update", on_press=self.update_item)
+        ]
+        self.action_view.set_text("")
+        self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
+        self.update_action_box()
 
-    def update_item_form(self, username: str) -> urwid.Widget:
-        body = [urwid.Text("Update Item"), urwid.Divider()]
-        name_edit = urwid.Edit("Item Name: ")
-        quantity_edit = urwid.Edit("New Quantity: ")
-        price_edit = urwid.Edit("New Price: ")
-        Code_edit = urwid.Edit("New Code: ")
-        expiry_date_edit = urwid.Edit("New Expiry Date: ")
+    def update_item(self, button):
+        form = self.action_view
+        name = form.body[0].edit_text
+        quantity = form.body[1].edit_text
+        price = form.body[2].edit_text
+        code = form.body[3].edit_text
+        expiry_date = form.body[4].edit_text
 
-        update_button = urwid.Button("Update Item")
-        urwid.connect_signal(update_button, "click", self.update_item_action, (username, name_edit, quantity_edit, price_edit, Code_edit, expiry_date_edit))
-
-        body.extend([name_edit, quantity_edit, price_edit, Code_edit, expiry_date_edit, urwid.AttrMap(update_button, None, focus_map="reversed")])
-        self.main.original_widget = urwid.ListBox(urwid.SimpleFocusListWalker(body))
-
-    def update_item_action(self, button: urwid.Button, edits: typing.Tuple[str, urwid.Edit, urwid.Edit, urwid.Edit, urwid.Edit, urwid.Edit]) -> None:
-        username = edits[0]
-        name = edits[1].edit_text
-        quantity = edits[2].edit_text
-        price = edits[3].edit_text
-        Code = edits[4].edit_text
-        expiry_date = edits[5].edit_text
         try:
             quantity = int(quantity)
             price = float(price)
-            if update_item(username, name, quantity, price, Code, expiry_date):
-                response = urwid.Text(("success", "Item updated successfully\n"))
+            if self.inventory_mgmt.update_item(self.username, name, quantity, price, code, expiry_date):
+                self.show_message("Item updated successfully")
             else:
-                response = urwid.Text(("error", "Item does not exist\n"))
+                self.show_message("Item not found")
         except ValueError:
-            response = urwid.Text(("error", "Invalid input. Quantity must be an integer and price must be a float\n"))
-    
-        done = urwid.Button("Ok")
-        urwid.connect_signal(done, "click", lambda button: self.inventory_menu(username))
-        self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
+            self.show_message("Invalid input. Quantity must be an integer and price must be a float")
 
-    def delete_item_form(self, username):
-        body = [urwid.Text("Delete Item"), urwid.Divider()]
-        id_edit = urwid.Edit("Item ID: ")
+    def show_delete_item(self):
+        content = [
+            urwid.Edit("Item ID: "),
+            urwid.Button("Delete", on_press=self.delete_item)
+        ]
+        self.action_view.set_text("")
+        self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
+        self.update_action_box()
 
-        delete_button = urwid.Button("Delete Item")
-        urwid.connect_signal(delete_button, "click", self.delete_item_action, (username, id_edit))
+    def delete_item(self, button):
+        form = self.action_view
+        item_id = form.body[0].edit_text
 
-        body.extend([id_edit, urwid.AttrMap(delete_button, None, focus_map="reversed")])
-        self.main.original_widget = urwid.ListBox(urwid.SimpleFocusListWalker(body))
-    
-    def delete_item_action(self, button: urwid.Button, edits: typing.Tuple[str, urwid.Edit]) -> None:
-        username = edits[0]
-        name = edits[1].edit_text
-        if delete_item(username, name):
-            response = urwid.Text(("success", "Item deleted successfully\n"))
+        if self.inventory_mgmt.delete_item(self.username, item_id):
+            self.show_message("Item deleted successfully")
         else:
-            response = urwid.Text(("error", "Item does not exist\n"))
+            self.show_message("Item not found")
 
-        done = urwid.Button("Ok")
-        urwid.connect_signal(done, "click", lambda button: self.inventory_menu(username))
-        self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
-    
+    def show_search_item(self):
+        content = [
+            urwid.Edit("Item Name: "),
+            urwid.Button("Search", on_press=self.search_item)
+        ]
+        self.action_view.set_text("")
+        self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
+        self.update_action_box()
+
+    def search_item(self, button):
+        form = self.action_view
+        name = form.body[0].edit_text
+
+        top_users = self.inventory_mgmt.get_top_users_for_item(name)
+        if top_users:
+            result = f"Research Result For {name}\n\n"
+            for user, count in top_users:
+                result += f"Username: {user}, Count: {count}\n"
+            self.show_message(result)
+        else:
+            self.show_message("Item not found")
+
+    def show_flag_item(self):
+        content = [
+            urwid.Edit("Item Name: "),
+            urwid.Button("Flag", on_press=self.flag_item)
+        ]
+        self.action_view.set_text("")
+        self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
+        self.update_action_box()
+
+    def flag_item(self, button):
+        form = self.action_view
+        name = form.body[0].edit_text
+
+        if self.inventory_mgmt.flag_item(self.username, name):
+            self.show_message("Item flagged successfully")
+        else:
+            self.show_message("Item not found")
+
+    def show_message(self, message):
+        self.action_view = urwid.Text(message)
+        self.update_action_box()
+
+    def update_action_box(self):
+        action_box = urwid.LineBox(self.action_view, title="Action")
+        right_column = self.main.original_widget.contents[1][0]
+        right_column.contents[1] = (action_box, right_column.options('weight', 2))
+
     def exit_program(self, button):
         raise urwid.ExitMainLoop()
 
 if __name__ == "__main__":
-    system = InventorySystem()
+    user_db = UserDatabase()
+    inventory_db = InventoryDatabase()
+    user_mgmt = UserManagement(user_db)
+    inventory_mgmt = InventoryManagement(inventory_db)
+    system = InventorySystemUI(user_mgmt, inventory_mgmt)
     system.main_menu()
     urwid.MainLoop(system.top, palette).run()
