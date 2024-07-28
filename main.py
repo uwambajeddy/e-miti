@@ -6,8 +6,13 @@ from user_database import UserDatabase
 from inventory_management import InventoryManagement
 from inventory_database import InventoryDatabase
 from datetime import datetime
-import typing
+import os
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Filter warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 palette = [
@@ -42,6 +47,7 @@ class InventorySystemUI:
             min_width=20, min_height=9
         )
         self.username = None
+        self.user_id = None
         self.action_view = None
 
     def main_menu(self, button=None):
@@ -126,9 +132,10 @@ class InventorySystemUI:
     def login_action(self, button, edits):
         username = edits[0].edit_text
         password = edits[1].edit_text
-        authenticated, role = self.user_mgmt.authenticate_user(username, password)
+        authenticated, user_id, role = self.user_mgmt.authenticate_user(username, password)
         if authenticated:
             self.username = username
+            self.user_id = user_id
             self.inventory_menu()
         else:
             response = urwid.Text(("error", "Login failed\n"))
@@ -137,8 +144,8 @@ class InventorySystemUI:
             self.main.original_widget = urwid.Filler(urwid.Pile([response, urwid.AttrMap(done, None, focus_map="reversed")]))
 
     def inventory_menu(self):
-        inventory = self.inventory_mgmt.get_inventory(self.username)
-    
+        inventory = self.inventory_mgmt.get_inventory(self.user_id)
+
         header = urwid.Columns([
             urwid.Text("ID"),
             urwid.Text("Name"),
@@ -147,24 +154,25 @@ class InventorySystemUI:
             urwid.Text("Quantity"),
             urwid.Text("Code")
         ])
-    
+
         items = []
-        for item_list in inventory.values():
-            for item in item_list:
-                item_widget = urwid.Columns([
-                    urwid.Text(str(item['id'])),
-                    urwid.Text(item['name']),
-                    urwid.Text(item['expiry_date']),
-                    urwid.Text(str(item['price'])),
-                    urwid.Text(str(item['quantity'])),
-                    urwid.Text(str(item['code']))
-                ])
-                if item['expiry_date'] < datetime.now().strftime('%Y-%m-%d %H:%M:%S'):
-                    items.append(urwid.AttrMap(item_widget, 'expired'))
-                elif item.get('flag', False):
-                    items.append(urwid.AttrMap(item_widget, 'flagged'))
-                else:
-                    items.append(item_widget)
+        for item in inventory:
+            # Format the expiry_date as a string
+            expiry_date_str = item['expiry_date'].strftime('%Y-%m-%d %H:%M:%S')
+            item_widget = urwid.Columns([
+                urwid.Text(str(item['id'])),
+                urwid.Text(item['name']),
+                urwid.Text(expiry_date_str),  # Use the formatted string here
+                urwid.Text(str(item['price'])),
+                urwid.Text(str(item['quantity'])),
+                urwid.Text(str(item['code']))
+            ])
+            if item['expiry_date'] < datetime.now():
+                items.append(urwid.AttrMap(item_widget, 'expired'))
+            elif item.get('flag', False):
+                items.append(urwid.AttrMap(item_widget, 'flagged'))
+            else:
+                items.append(item_widget)
 
         inventory_list = urwid.ListBox(urwid.SimpleFocusListWalker([header] + items))
         inventory_box = urwid.LineBox(inventory_list, title="Inventory")
@@ -213,7 +221,6 @@ class InventorySystemUI:
             urwid.CheckBox("Flag"),
             urwid.Button("Add", on_press=self.add_item)
         ]
-        self.action_view.set_text("")
         self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
         self.update_action_box()
 
@@ -226,11 +233,16 @@ class InventorySystemUI:
         expiry_date = form.body[4].edit_text
         flag = form.body[5].state
 
+        if not name or not quantity or not price or not code or not expiry_date:
+            self.show_message("All fields are required.")
+            return
+
         try:
             quantity = int(quantity)
             price = float(price)
-            if self.inventory_mgmt.add_item(self.username, name, quantity, price, code, expiry_date, flag):
+            if self.inventory_mgmt.add_item(self.user_id, name, quantity, price, code, expiry_date, flag):
                 self.show_message("Item added successfully")
+                self.inventory_menu()  # Refresh inventory
             else:
                 self.show_message("Failed to add item")
         except ValueError:
@@ -238,41 +250,47 @@ class InventorySystemUI:
 
     def show_update_item(self):
         content = [
-            urwid.Edit("Name: "),
+            urwid.Edit("Item ID: "),
+            urwid.Edit("New Name: "),
             urwid.Edit("New Quantity: "),
             urwid.Edit("New Price: "),
             urwid.Edit("New Code: "),
             urwid.Edit("New Expiry Date: "),
             urwid.Button("Update", on_press=self.update_item)
         ]
-        self.action_view.set_text("")
         self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
         self.update_action_box()
 
     def update_item(self, button):
         form = self.action_view
-        name = form.body[0].edit_text
-        quantity = form.body[1].edit_text
-        price = form.body[2].edit_text
-        code = form.body[3].edit_text
-        expiry_date = form.body[4].edit_text
+        item_id = form.body[0].edit_text
+        name = form.body[1].edit_text
+        quantity = form.body[2].edit_text
+        price = form.body[3].edit_text
+        code = form.body[4].edit_text
+        expiry_date = form.body[5].edit_text
+
+        if not item_id or not name or not quantity or not price or not code or not expiry_date:
+            self.show_message("All fields are required.")
+            return
 
         try:
+            item_id = int(item_id)
             quantity = int(quantity)
             price = float(price)
-            if self.inventory_mgmt.update_item(self.username, name, quantity, price, code, expiry_date):
+            if self.inventory_mgmt.update_item(item_id, name, quantity, price, code, expiry_date):
                 self.show_message("Item updated successfully")
+                self.inventory_menu()  # Refresh inventory
             else:
                 self.show_message("Item not found")
         except ValueError:
-            self.show_message("Invalid input. Quantity must be an integer and price must be a float")
+            self.show_message("Invalid input. Item ID, Quantity must be integers and price must be a float")
 
     def show_delete_item(self):
         content = [
             urwid.Edit("Item ID: "),
             urwid.Button("Delete", on_press=self.delete_item)
         ]
-        self.action_view.set_text("")
         self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
         self.update_action_box()
 
@@ -280,17 +298,25 @@ class InventorySystemUI:
         form = self.action_view
         item_id = form.body[0].edit_text
 
-        if self.inventory_mgmt.delete_item(self.username, item_id):
-            self.show_message("Item deleted successfully")
-        else:
-            self.show_message("Item not found")
+        if not item_id:
+            self.show_message("Item ID is required.")
+            return
+
+        try:
+            item_id = int(item_id)
+            if self.inventory_mgmt.delete_item(item_id):
+                self.show_message("Item deleted successfully")
+                self.inventory_menu()  # Refresh inventory
+            else:
+                self.show_message("Item not found")
+        except ValueError:
+            self.show_message("Invalid input. Item ID must be an integer")
 
     def show_search_item(self):
         content = [
             urwid.Edit("Item Name: "),
             urwid.Button("Search", on_press=self.search_item)
         ]
-        self.action_view.set_text("")
         self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
         self.update_action_box()
 
@@ -298,32 +324,48 @@ class InventorySystemUI:
         form = self.action_view
         name = form.body[0].edit_text
 
+        if not name:
+            self.show_message("Item name is required.")
+            return
+
         top_users = self.inventory_mgmt.get_top_users_for_item(name)
         if top_users:
             result = f"Research Result For {name}\n\n"
-            for user, count in top_users:
-                result += f"Username: {user}, Count: {count}\n"
-            self.show_message(result)
+            for user in top_users:
+                result += f"Username: {user['username']}, Count: {user['total_quantity']}\n"
+            self.show_search_result(result)
         else:
             self.show_message("Item not found")
 
+    def show_search_result(self, result):
+        self.action_view = urwid.Text(result)
+        self.update_action_box()
+
     def show_flag_item(self):
         content = [
-            urwid.Edit("Item Name: "),
+            urwid.Edit("Item ID: "),
             urwid.Button("Flag", on_press=self.flag_item)
         ]
-        self.action_view.set_text("")
         self.action_view = urwid.ListBox(urwid.SimpleFocusListWalker(content))
         self.update_action_box()
 
     def flag_item(self, button):
         form = self.action_view
-        name = form.body[0].edit_text
+        item_id = form.body[0].edit_text
 
-        if self.inventory_mgmt.flag_item(self.username, name):
-            self.show_message("Item flagged successfully")
-        else:
-            self.show_message("Item not found")
+        if not item_id:
+            self.show_message("Item ID is required.")
+            return
+
+        try:
+            item_id = int(item_id)
+            if self.inventory_mgmt.flag_item(item_id):
+                self.show_message("Item flagged successfully")
+                self.inventory_menu()  # Refresh inventory
+            else:
+                self.show_message("Item not found")
+        except ValueError:
+            self.show_message("Invalid input. Item ID must be an integer")
 
     def show_message(self, message):
         self.action_view = urwid.Text(message)
@@ -338,8 +380,17 @@ class InventorySystemUI:
         raise urwid.ExitMainLoop()
 
 if __name__ == "__main__":
-    user_db = UserDatabase()
-    inventory_db = InventoryDatabase()
+    # Load environment variables
+    load_dotenv()
+
+    # Get MySQL connection parameters from environment variables
+    db_host = os.getenv("DB_HOST")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_name = os.getenv("DB_NAME")
+
+    user_db = UserDatabase(host=db_host, user=db_user, password=db_password, database=db_name)
+    inventory_db = InventoryDatabase(host=db_host, user=db_user, password=db_password, database=db_name)
     user_mgmt = UserManagement(user_db)
     inventory_mgmt = InventoryManagement(inventory_db)
     system = InventorySystemUI(user_mgmt, inventory_mgmt)
